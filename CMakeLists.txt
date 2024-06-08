@@ -19,10 +19,11 @@ set(CMAKE_CXX_COMPILER g++) # or clang++
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -Ofast -ffast-math -funroll-loops -march=native") # get crazy here
 #add_compile_options("-std=c++17")
 #set(CMAKE_CXX_FLAGS "-O0  -ggdb")
-link_libraries( ${IBVERBS_LIBRARY} ${RDMACM_LIBRARY})
 
 find_library(IBVERBS_LIBRARY ibverbs HINTS /lib/x86_64-linux-gnu/)
 find_library(RDMACM_LIBRARY rdmacm HINTS /lib/x86_64-linux-gnu/)
+link_libraries( ${IBVERBS_LIBRARY} ${RDMACM_LIBRARY})
+
 
 add_executable(rc_send ${PROJECT_SOURCE_DIR}/rc_send.cpp)
 add_executable(rc_pingpong ${PROJECT_SOURCE_DIR}/rc_pingpong.cpp)
