@@ -26,3 +26,5 @@ link_libraries( ${IBVERBS_LIBRARY} ${RDMACM_LIBRARY})
 
 add_executable(rc_send ${PROJECT_SOURCE_DIR}/rc_send.cpp)
 add_executable(rc_pingpong ${PROJECT_SOURCE_DIR}/rc_pingpong.cpp)
+add_executable(uc_pingpong ${PROJECT_SOURCE_DIR}/uc_pingpong.c)
+add_executable(uc_write ${PROJECT_SOURCE_DIR}/uc_write.c)
