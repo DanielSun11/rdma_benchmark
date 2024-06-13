@@ -95,6 +95,11 @@ enum {
 	PINGPONG_RECV_WRID = 1,
 	PINGPONG_SEND_WRID = 2,
 };
+enum bench_mode{
+	SINGLE = 1,
+	MULTIPLE = 2,
+};
+
 
 static int page_size;
 static int validate_buf;
@@ -520,47 +525,6 @@ static int pp_close_ctx(struct pingpong_context *ctx)
 	return 0;
 }
 
-static int pp_post_recv(struct pingpong_context *ctx, int n)
-{
-	struct ibv_sge list = {
-		.addr	= (uintptr_t) ctx->buf,
-		.length = ctx->size,
-		.lkey	= ctx->mr->lkey
-	};
-	struct ibv_recv_wr wr = {
-		.wr_id	    = PINGPONG_RECV_WRID,
-		.sg_list    = &list,
-		.num_sge    = 1,
-	};
-	struct ibv_recv_wr *bad_wr;
-	int i;
-
-	for (i = 0; i < n; ++i)
-		if (ibv_post_recv(ctx->qp, &wr, &bad_wr))
-			break;
-
-	return i;
-}
-
-static int pp_post_send(struct pingpong_context *ctx)
-{
-	struct ibv_sge list = {
-		.addr	= (uintptr_t) ctx->buf,
-		.length = ctx->size,
-		.lkey	= ctx->mr->lkey
-	};
-	struct ibv_send_wr wr = {
-		.wr_id	    = PINGPONG_SEND_WRID,
-		.sg_list    = &list,
-		.num_sge    = 1,
-		.opcode     = IBV_WR_SEND,
-		.send_flags = ctx->send_flags,
-	};
-	struct ibv_send_wr *bad_wr;
-
-	return ibv_post_send(ctx->qp, &wr, &bad_wr);
-}
-
 static void usage(const char *argv0)
 {
 	printf("Usage:\n");
@@ -571,7 +535,8 @@ static void usage(const char *argv0)
 	printf("  -p, --port=<port>      listen on/connect to port <port> (default 18515)\n");
 	printf("  -d, --ib-dev=<dev>     use IB device <dev> (default first device found)\n");
 	printf("  -i, --ib-port=<port>   use port <port> of IB device (default 1)\n");
-	printf("  -s, --size=<size>      size of message to exchange (default 4096)\n");
+	printf("  -s, --size=<size>      size of message to exchange (default 0)\n");
+	printf("  -u, --max-size=<size>  max size of message to exchange (default 4096)\n");
 	printf("  -m, --mtu=<size>       path MTU (default 1024)\n");
 	printf("  -r, --rx-depth=<dep>   number of receives to post at a time (default 500)\n");
 	printf("  -n, --iters=<iters>    number of exchanges (default 1000)\n");
@@ -637,24 +602,47 @@ void rdma_write_ops(struct pingpong_context * ctx,unsigned int iters,uint32_t si
 			}
 			nums_cqe+=ret;
 		}
-
-        // Poll CQ to ensure completion
-        // if(i % 10 == 0){
-        //     poll_cq(res->conn_id->qp->send_cq,10);
-        // }
-        // while (ibv_poll_cq(ctx->qp->send_cq, 1, &wc) < 1) {
-        //     // Busy-wait
-        // }
-
-
-
-
-
-        //Simulation calculation process 
-        // if ((i + 1) % 1000 == 0) {
-        //     sleep(1);
-        // }
     }
+}
+
+void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_size,enum bench_mode mode){
+	struct timeval start, end;
+	int size = 0;
+	if(mode == SINGLE){
+		size = max_size;
+	}else if(mode == MULTIPLE){
+		size = 2;
+	}
+	printf("RDMA Write Benchmark\n");
+	printf("Connection type : %s\n","UC");
+	printf("%-20s %-20s %-20s \n", "Message size(byte) ", "Iterations", "Bandwidth(Gbps)");
+	while(size <= max_size){
+		//start  write
+		if (gettimeofday(&start, NULL)) {
+			perror("gettimeofday");
+			return 1;
+		}
+		rdma_write_ops(ctx,iters,size);
+		//end  write
+		if (gettimeofday(&end, NULL)) {
+			perror("gettimeofday");
+			return 1;
+		}
+		{
+			float usec = (end.tv_sec - start.tv_sec) * 1000000 +
+				(end.tv_usec - start.tv_usec);
+			long long bytes = (long long) size * iters ;
+			double  bw = bytes*8.0/(usec)/1000;
+			printf("%-20d  %-20d   %-20.3lf \n",size,iters,bw);
+		}
+		if(size < max_size && size*2 > max_size){
+			size = max_size;
+		}else{
+			size *= 2;
+		}
+		
+	}
+		
 }
 
 int main(int argc, char *argv[])
@@ -669,7 +657,8 @@ int main(int argc, char *argv[])
 	char                    *servername = NULL;
 	unsigned int             port = 18515;
 	int                      ib_port = 1;
-	unsigned int             size = 4096;
+	unsigned int             size = 0;
+	unsigned int             max_size = 4096;
 	enum ibv_mtu		 mtu = IBV_MTU_1024;
 	unsigned int             rx_depth = 500;
 	unsigned int             iters = 1000;
@@ -697,12 +686,13 @@ int main(int argc, char *argv[])
 			{ .name = "iters",    .has_arg = 1, .val = 'n' },
 			{ .name = "sl",       .has_arg = 1, .val = 'l' },
 			{ .name = "events",   .has_arg = 0, .val = 'e' },
+			{ .name = "max-size", .has_arg = 1, .val = 'u' },
 			{ .name = "gid-idx",  .has_arg = 1, .val = 'g' },
 			{ .name = "chk",      .has_arg = 0, .val = 'c' },
 			{}
 		};
 
-		c = getopt_long(argc, argv, "p:d:i:s:m:r:n:l:eg:c",
+		c = getopt_long(argc, argv, "p:d:i:s:m:r:n:l:u:eg:c",
 				long_options, NULL);
 		if (c == -1)
 			break;
@@ -759,7 +749,9 @@ int main(int argc, char *argv[])
 		case 'g':
 			gidx = strtol(optarg, NULL, 0);
 			break;
-
+		case 'u':
+			max_size = strtol(optarg, NULL, 0);
+			break;
 		case 'c':
 			validate_buf = 1;
 			break;
@@ -803,15 +795,15 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	ctx = pp_init_ctx(ib_dev, size, rx_depth, ib_port, use_event);
+	ctx = pp_init_ctx(ib_dev, size==0?max_size:size, rx_depth, ib_port, use_event);
 	if (!ctx)
 		return 1;
 
-	routs = pp_post_recv(ctx, ctx->rx_depth);
-	if (routs < ctx->rx_depth) {
-		fprintf(stderr, "Couldn't post receive (%d)\n", routs);
-		return 1;
-	}
+	// routs = pp_post_recv(ctx, ctx->rx_depth);
+	// if (routs < ctx->rx_depth) {
+	// 	fprintf(stderr, "Couldn't post receive (%d)\n", routs);
+	// 	return 1;
+	// }
 
 	if (use_event)
 		if (ibv_req_notify_cq(ctx->cq, 0)) {
@@ -843,7 +835,7 @@ int main(int argc, char *argv[])
 	my_dest.qpn = ctx->qp->qp_num;
 	my_dest.psn = lrand48() & 0xffffff;
 	inet_ntop(AF_INET6, &my_dest.gid, gid, sizeof gid);
-	my_dest.rkey = ctx->mr->lkey;
+	my_dest.rkey = ctx->mr->rkey;
 	my_dest.dest_addr =(uint64_t)ctx->mr->addr;
 	printf("  local address:  LID 0x%04x, QPN 0x%06x, PSN 0x%06x,KEY 0x%08x,ADDR 0x%lx,GID %s\n",
 	       my_dest.lid, my_dest.qpn, my_dest.psn,my_dest.rkey,my_dest.dest_addr, gid);
@@ -869,48 +861,16 @@ int main(int argc, char *argv[])
 
 	ctx->pending = PINGPONG_RECV_WRID;
 
-	if (servername) {
-		if (validate_buf)
-			for (int i = 0; i < size; i += page_size)
-				ctx->buf[i] = i / page_size % sizeof(char);
-
-		if (pp_post_send(ctx)) {
-			fprintf(stderr, "Couldn't post send\n");
-			return 1;
-		}
-		ctx->pending |= PINGPONG_SEND_WRID;
-	}
 	if(servername){
-		//start uc write
-		if (gettimeofday(&start, NULL)) {
-			perror("gettimeofday");
-			return 1;
-		}
-		rdma_write_ops(ctx,iters,ctx->size/2);
-		//end uc write
-		if (gettimeofday(&end, NULL)) {
-			perror("gettimeofday");
-			return 1;
+		if(size == 0){
+			rdma_write_benchmark(ctx,iters,max_size,MULTIPLE);
+		}else{
+			rdma_write_benchmark(ctx,iters,size,SINGLE);
 		}
 		memcpy(sync_message,"done",sizeof("done"));
 		int ret = write(ctx->sockfd,sync_message,sizeof(*sync_message));
 		if(ret < 0){
 			printf("client socket sync erro %d\n",ret);
-		}
-		{
-			float usec = (end.tv_sec - start.tv_sec) * 1000000 +
-				(end.tv_usec - start.tv_usec);
-			long long bytes = (long long) ctx->size/2 * iters ;
-			printf("Write Benchmark:\n");
-			printf("%lld bytes in %.2f seconds = %.2f Mbit/sec\n",
-			       bytes, usec / 1000000., bytes * 8. / usec);
-			printf("%d iters in %.2f seconds = %.2f usec/iter\n",
-			       iters, usec / 1000000., usec / iters);
-		}
-
-		if (gettimeofday(&start, NULL)) {
-			perror("gettimeofday");
-			return 1;
 		}
 	}else{
 		int ret = read(ctx->sockfd,sync_message,sizeof(*sync_message));
@@ -918,118 +878,6 @@ int main(int argc, char *argv[])
 			printf("server socket sync erro %d\n",ret);
 		}
 	}
-
-	// if (gettimeofday(&start, NULL)) {
-	// 	perror("gettimeofday");
-	// 	return 1;
-	// }
-	// rcnt = scnt = 0;
-	// while (rcnt < iters || scnt < iters) {
-	// 	if (use_event) {
-	// 		struct ibv_cq *ev_cq;
-	// 		void          *ev_ctx;
-
-	// 		if (ibv_get_cq_event(ctx->channel, &ev_cq, &ev_ctx)) {
-	// 			fprintf(stderr, "Failed to get cq_event\n");
-	// 			return 1;
-	// 		}
-
-	// 		++num_cq_events;
-
-	// 		if (ev_cq != ctx->cq) {
-	// 			fprintf(stderr, "CQ event for unknown CQ %p\n", ev_cq);
-	// 			return 1;
-	// 		}
-
-	// 		if (ibv_req_notify_cq(ctx->cq, 0)) {
-	// 			fprintf(stderr, "Couldn't request CQ notification\n");
-	// 			return 1;
-	// 		}
-	// 	}
-
-	// 	{
-	// 		struct ibv_wc wc[2];
-	// 		int ne, i;
-
-	// 		do {
-	// 			ne = ibv_poll_cq(ctx->cq, 2, wc);
-	// 			if (ne < 0) {
-	// 				fprintf(stderr, "poll CQ failed %d\n", ne);
-	// 				return 1;
-	// 			}
-
-	// 		} while (!use_event && ne < 1);
-
-	// 		for (i = 0; i < ne; ++i) {
-	// 			if (wc[i].status != IBV_WC_SUCCESS) {
-	// 				fprintf(stderr, "Failed status %s (%d) for wr_id %d\n",
-	// 					ibv_wc_status_str(wc[i].status),
-	// 					wc[i].status, (int) wc[i].wr_id);
-	// 				return 1;
-	// 			}
-
-	// 			switch ((int) wc[i].wr_id) {
-	// 			case PINGPONG_SEND_WRID:
-	// 				++scnt;
-	// 				break;
-
-	// 			case PINGPONG_RECV_WRID:
-	// 				if (--routs <= 1) {
-	// 					routs += pp_post_recv(ctx, ctx->rx_depth - routs);
-	// 					if (routs < ctx->rx_depth) {
-	// 						fprintf(stderr,
-	// 							"Couldn't post receive (%d)\n",
-	// 							routs);
-	// 						return 1;
-	// 					}
-	// 				}
-
-	// 				++rcnt;
-	// 				break;
-
-	// 			default:
-	// 				fprintf(stderr, "Completion for unknown wr_id %d\n",
-	// 					(int) wc[i].wr_id);
-	// 				//return 1;
-	// 			}
-
-	// 			ctx->pending &= ~(int) wc[i].wr_id;
-	// 			if (scnt < iters && !ctx->pending) {
-	// 				if (pp_post_send(ctx)) {
-	// 					fprintf(stderr, "Couldn't post send\n");
-	// 					return 1;
-	// 				}
-	// 				ctx->pending = PINGPONG_RECV_WRID |
-	// 					       PINGPONG_SEND_WRID;
-	// 			}
-	// 		}
-	// 	}
-	// }
-
-	// if (gettimeofday(&end, NULL)) {
-	// 	perror("gettimeofday");
-	// 	return 1;
-	// }
-
-	// {
-	// 	float usec = (end.tv_sec - start.tv_sec) * 1000000 +
-	// 		(end.tv_usec - start.tv_usec);
-	// 	long long bytes = (long long) size * iters * 2;
-
-	// 	printf("%lld bytes in %.2f seconds = %.2f Mbit/sec\n",
-	// 	       bytes, usec / 1000000., bytes * 8. / usec);
-	// 	printf("%d iters in %.2f seconds = %.2f usec/iter\n",
-	// 	       iters, usec / 1000000., usec / iters);
-
-	// 	if ((!servername) && (validate_buf)) {
-	// 		for (int i = 0; i < size; i += page_size)
-	// 			if (ctx->buf[i] != i / page_size % sizeof(char))
-	// 				printf("invalid data in page %d\n",
-	// 				       i / page_size);
-	// 	}
-	// }
-
-	// ibv_ack_cq_events(ctx->cq, num_cq_events);
 
 end:
 	if (pp_close_ctx(ctx))

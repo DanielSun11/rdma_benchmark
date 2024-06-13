@@ -572,7 +572,7 @@ int poll_cq(struct context * ctx,int nums){
 
 	return 0;
 }
-void rdma_write_ops(struct context * ctx,unsigned int iters,uint32_t size){
+void rdma_read_ops(struct context * ctx,unsigned int iters,uint32_t size){
 	uint32_t nums_cqe = 0;
 	struct ibv_wc wc[25];
     // Perform RDMA Write operations
@@ -609,7 +609,7 @@ void rdma_write_ops(struct context * ctx,unsigned int iters,uint32_t size){
 
     }
 }
-void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_size,enum bench_mode mode){
+void rdma_read_benchmark(struct context * ctx,unsigned int iters,uint32_t max_size,enum bench_mode mode){
 	struct timeval start, end;
 	int size = 0;
 	if(mode == SINGLE){
@@ -618,20 +618,20 @@ void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_s
 		size = 2;
 	}
 	
-	printf("RDMA Write Benchmark  \n");
+	printf("RDMA Read Benchmark\n");
 	printf("Connection type : %s\n","RC");
 	printf("%-20s %-20s %-20s \n", "Message size(byte) ", "Iterations", "Bandwidth(Gbps)");
 	while(size <= max_size){
 		//start  write
 		if (gettimeofday(&start, NULL)) {
 			perror("gettimeofday");
-			return ;
+			return 1;
 		}
-		rdma_write_ops(ctx,iters,size);
+		rdma_read_ops(ctx,iters,size);
 		//end  write
 		if (gettimeofday(&end, NULL)) {
 			perror("gettimeofday");
-			return ;
+			return 1;
 		}
 		{
 			float usec = (end.tv_sec - start.tv_sec) * 1000000 +
@@ -870,9 +870,9 @@ int main(int argc, char *argv[])
 
 	if(servername){
 		if(size == 0){
-			rdma_write_benchmark(ctx,iters,max_size,MULTIPLE);
+			rdma_read_benchmark(ctx,iters,max_size,MULTIPLE);
 		}else{
-			rdma_write_benchmark(ctx,iters,size,SINGLE);
+			rdma_read_benchmark(ctx,iters,size,SINGLE);
 		}
 		memcpy(sync_message,"done",sizeof("done"));
 		int ret = write(ctx->sockfd,sync_message,sizeof(*sync_message));
@@ -885,59 +885,6 @@ int main(int argc, char *argv[])
 			printf("server socket sync erro %d\n",ret);
 		}
 	}
-
-
-
-	// if (gettimeofday(&start, NULL)) {
-	// 	perror("gettimeofday");
-	// 	return 1;
-	// }
-
-	// rcnt = scnt = 0;
-    // int count = 0;
-    // int total = 0;
-	// while (rcnt < iters || scnt < iters) {
-	// 	int ret;
-	// 	int ne, i;
-	// 	struct ibv_wc wc[2];
-
-	// 	do {
-	// 		ne = ibv_poll_cq(ctx->cq_s.cq, 2, wc);
-	// 		if (ne < 0) {
-	// 			fprintf(stderr, "poll CQ failed %d\n", ne);
-	// 			return 1;
-	// 		}
-	// 	} while (ne < 1);
-
-	// 	for (i = 0; i < ne; ++i) {
-	// 		ret = parse_single_wc(ctx, &scnt, &rcnt, &routs,
-	// 						iters,
-	// 						wc[i].wr_id,
-	// 						wc[i].status);
-	// 		if (ret) {
-	// 			fprintf(stderr, "parse WC failed %d\n", ne);
-	// 			return 1;
-	// 		}
-	// 	}
-	// }
-
-	// if (gettimeofday(&end, NULL)) {
-	// 	perror("gettimeofday");
-	// 	return 1;
-	// }
-
-	// {
-	// 	float usec = (end.tv_sec - start.tv_sec) * 1000000 +
-	// 		(end.tv_usec - start.tv_usec);
-	// 	long long bytes = (long long) size * iters * 2;
-
-	// 	printf("%lld bytes in %.2f seconds = %.2f Mbit/sec\n",
-	// 	       bytes, usec / 1000000., bytes * 8. / usec);
-	// 	printf("%d iters in %.2f seconds = %.2f usec/iter\n",
-	// 	       iters, usec / 1000000., usec / iters);
-	// }
-
-	// ibv_ack_cq_events(ctx->cq_s.cq, num_cq_events);
 
 	if (close_ctx(ctx))
 		return 1;
