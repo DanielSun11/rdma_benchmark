@@ -661,13 +661,13 @@ static void usage(const char *argv0)
 	printf("  -p, --port=<port>      listen on/connect to port <port> (default 18515)\n");
 	printf("  -d, --ib-dev=<dev>     use IB device <dev> (default first device found)\n");
 	printf("  -i, --ib-port=<port>   use port <port> of IB device (default 1)\n");
-	printf("  -s, --size=<size>      size of message to exchange (default 4096)\n");
+	printf("  -s, --size=<size>      size of message to exchange (default 0)\n");
 	printf("  -m, --mtu=<size>       path MTU (default 1024)\n");
 	printf("  -r, --rx-depth=<dep>   number of receives to post at a time (default 500)\n");
 	printf("  -n, --iters=<iters>    number of exchanges (default 1000)\n");
 	printf("  -l, --sl=<sl>          service level value\n");
 	printf("  -g, --gid-idx=<gid index> local port gid index\n");
-	printf("  -u, --max-size=<size>  max size of message to exchange (default 0)\n");
+	printf("  -u, --max-size=<size>  max size of message to exchange (default 4096)\n");
 
 	
 }
@@ -844,7 +844,7 @@ int main(int argc, char *argv[])
 	inet_ntop(AF_INET6, &my_dest.gid, gid, sizeof gid);
 	my_dest.rkey = ctx->mr->rkey;
 	my_dest.dest_addr =(uint64_t)ctx->mr->addr;
-	printf("  local address:  LID 0x%04x, QPN 0x%06x, PSN 0x%06x,KEY 0x%08x,ADDR 0x%lx,GID %s\n",
+	printf("local address:  LID 0x%04x, QPN 0x%06x, PSN 0x%06x,KEY 0x%08x,ADDR 0x%lx,GID %s\n",
 	       my_dest.lid, my_dest.qpn, my_dest.psn,my_dest.rkey,my_dest.dest_addr, gid);
 	
 	if (servername)
@@ -857,7 +857,8 @@ int main(int argc, char *argv[])
 		return 1;
 
 	inet_ntop(AF_INET6, &rem_dest->gid, gid, sizeof gid);
-	printf("  remote address: LID 0x%04x, QPN 0x%06x, PSN 0x%06x,KEY 0x%08x,ADDR 0x%lx,GID %s\n",
+
+	printf("remote address: LID 0x%04x, QPN 0x%06x, PSN 0x%06x,KEY 0x%08x,ADDR 0x%lx,GID %s\n",
 	       rem_dest->lid, rem_dest->qpn, rem_dest->psn,rem_dest->rkey,rem_dest->dest_addr, gid);
 	ctx->remote_info = rem_dest;
 

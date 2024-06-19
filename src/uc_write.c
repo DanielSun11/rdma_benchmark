@@ -837,7 +837,7 @@ int main(int argc, char *argv[])
 	inet_ntop(AF_INET6, &my_dest.gid, gid, sizeof gid);
 	my_dest.rkey = ctx->mr->rkey;
 	my_dest.dest_addr =(uint64_t)ctx->mr->addr;
-	printf("  local address:  LID 0x%04x, QPN 0x%06x, PSN 0x%06x,KEY 0x%08x,ADDR 0x%lx,GID %s\n",
+	printf("local address:  LID 0x%04x, QPN 0x%06x, PSN 0x%06x,KEY 0x%08x,ADDR 0x%lx,GID %s\n",
 	       my_dest.lid, my_dest.qpn, my_dest.psn,my_dest.rkey,my_dest.dest_addr, gid);
 
 
@@ -851,7 +851,7 @@ int main(int argc, char *argv[])
 		return 1;
 	ctx->remote_info = rem_dest;
 	inet_ntop(AF_INET6, &rem_dest->gid, gid, sizeof gid);
-	printf("  remote address: LID 0x%04x, QPN 0x%06x, PSN 0x%06x,KEY 0x%08x,ADDR 0x%lx,GID %s\n",
+	printf("remote address: LID 0x%04x, QPN 0x%06x, PSN 0x%06x,KEY 0x%08x,ADDR 0x%lx,GID %s\n",
 	       rem_dest->lid, rem_dest->qpn, rem_dest->psn,rem_dest->rkey,rem_dest->dest_addr, gid);
 
 	if (servername)
