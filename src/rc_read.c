@@ -661,13 +661,13 @@ static void usage(const char *argv0)
 	printf("  -p, --port=<port>      listen on/connect to port <port> (default 18515)\n");
 	printf("  -d, --ib-dev=<dev>     use IB device <dev> (default first device found)\n");
 	printf("  -i, --ib-port=<port>   use port <port> of IB device (default 1)\n");
-	printf("  -s, --size=<size>      size of message to exchange (default 4096)\n");
+	printf("  -s, --size=<size>      size of message to exchange (default 0)\n");
 	printf("  -m, --mtu=<size>       path MTU (default 1024)\n");
 	printf("  -r, --rx-depth=<dep>   number of receives to post at a time (default 500)\n");
 	printf("  -n, --iters=<iters>    number of exchanges (default 1000)\n");
 	printf("  -l, --sl=<sl>          service level value\n");
 	printf("  -g, --gid-idx=<gid index> local port gid index\n");
-	printf("  -u, --max-size=<size>  max size of message to exchange (default 0)\n");
+	printf("  -u, --max-size=<size>  max size of message to exchange (default 4096)\n");
 
 	
 }

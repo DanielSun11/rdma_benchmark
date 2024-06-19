@@ -17,6 +17,10 @@ enum {
 	RECV_WRID = 1,
 	SEND_WRID = 2,
 };
+enum bench_mode{
+	SINGLE = 1,
+	MULTIPLE = 2,
+};
 
 static int page_size;
 
@@ -543,12 +547,14 @@ static void usage(const char *argv0)
 	printf("  -p, --port=<port>      listen on/connect to port <port> (default 18515)\n");
 	printf("  -d, --ib-dev=<dev>     use IB device <dev> (default first device found)\n");
 	printf("  -i, --ib-port=<port>   use port <port> of IB device (default 1)\n");
-	printf("  -s, --size=<size>      size of message to exchange (default 4096)\n");
+	printf("  -s, --size=<size>      size of message to exchange (default 0)\n");
 	printf("  -m, --mtu=<size>       path MTU (default 1024)\n");
 	printf("  -r, --rx-depth=<dep>   number of receives to post at a time (default 500)\n");
 	printf("  -n, --iters=<iters>    number of exchanges (default 1000)\n");
 	printf("  -l, --sl=<sl>          service level value\n");
 	printf("  -g, --gid-idx=<gid index> local port gid index\n");
+	printf("  -u, --max-size=<size>  max size of message to exchange (default 4096)\n");
+
 }
 
 int post_send_poll(struct context *ctx, int count,int size)
@@ -632,36 +638,45 @@ int rdma_send_recv_ops(struct context *ctx, char *servername, int size, int iter
 	}
 	return 0;
 }
-int rdma_send_recv_benchmark(struct context *ctx, char *servername, int size, int iters, int *routs){
+int rdma_send_recv_benchmark(struct context *ctx, char *servername, int max_size, int iters, int *routs,enum bench_mode mode){
 
 	int rt = 0;
 	struct timeval start, end;
 	printf("RDMA Send_Recv Benchmark  \n");
 	printf("Connection type : %s\n","RC");
 	printf("%-20s %-20s %-20s \n", "Message size(byte) ", "Iterations", "Bandwidth(Gbps)");
-	for(int i = 2; i < size; i*=2 ){
+	int size = 2;
+	if(mode == SINGLE){
+		size = max_size;
+	}
+	while(size <= max_size ){
 		//start  clock
 		if (gettimeofday(&start, NULL)) {
 			perror("gettimeofday");
 			return -1;
 		}
-		rt = rdma_send_recv_ops(ctx,servername,i,iters,routs);
+		rt = rdma_send_recv_ops(ctx,servername,size,iters,routs);
 		//end  clock
 		if (gettimeofday(&end, NULL)) {
 			perror("gettimeofday");
 			return -1;
 		}
 		if(rt){
-			printf("rdma_send_recv_benchmark error size %d rt %d \n",i,rt);
+			printf("rdma_send_recv_benchmark error size %d rt %d \n",size,rt);
 			return rt;
 		}
 
 		{
 			float usec = (end.tv_sec - start.tv_sec) * 1000000 +
 				(end.tv_usec - start.tv_usec);
-			long long bytes = (long long) i * iters ;
+			long long bytes = (long long) size * iters ;
 			double  bw = bytes*8.0/(usec)/1000;
-			printf("%-20d  %-20d   %-20.3lf \n",i,iters,bw);
+			printf("%-20d  %-20d   %-20.3lf \n",size,iters,bw);
+		}
+		if(size < max_size && size*2 > max_size){
+			size = max_size;
+		}else{
+			size *= 2;
 		}
 	}
 	return rt;
@@ -678,7 +693,9 @@ int main(int argc, char *argv[])
 	char                    *servername = NULL;
 	unsigned int             port = 18515;
 	int                      ib_port = 1;
-	unsigned int             size = 4096;
+	unsigned int             size = 0;
+	unsigned int             max_size = 4096;
+
 	enum ibv_mtu		 mtu = IBV_MTU_1024;
 	unsigned int             rx_depth = 512;
 	unsigned int             iters = 1000;
@@ -703,11 +720,12 @@ int main(int argc, char *argv[])
 			{ "rx-depth", 1, NULL, 'r' },
 			{ "iters",    1, NULL, 'n' },
 			{ "sl",       1, NULL, 'l' },
+			{ "max-size", 1, NULL, 'u' },
 			{ "gid-idx",  1, NULL, 'g' },
 			{ NULL,		  0, NULL, 0 }  // 结尾元素，必要以表示数组结束
 		};
 
-		c = getopt_long(argc, argv, "p:d:i:s:m:r:n:l:eg:oOPtcjN",
+		c = getopt_long(argc, argv, "p:d:i:s:m:r:n:l:u:eg:oOPtcjN",
 				long_options, NULL);
 
 		if (c == -1)
@@ -762,6 +780,10 @@ int main(int argc, char *argv[])
 			gidx = strtol(optarg, NULL, 0);
 			break;
 
+		case 'u':
+			max_size = strtol(optarg, NULL, 0);
+			break;
+
 		default:
 			usage(argv[0]);
 			return 1;
@@ -801,7 +823,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	ctx = init_ctx(ib_dev, size, rx_depth, ib_port);
+	ctx = init_ctx(ib_dev, size?size:max_size, rx_depth, ib_port);
 	if (!ctx)
 		return 1;
 
@@ -858,11 +880,19 @@ int main(int argc, char *argv[])
 			return 1;
 
 	ctx->pending = RECV_WRID;
-
-	if (rdma_send_recv_benchmark(ctx, servername, size, iters, &routs)) {
-		fprintf(stderr, "rdma_send_recv_benchmark error\n");
-		return 1;
+	if(size){
+		if (rdma_send_recv_benchmark(ctx, servername, size, iters, &routs,SINGLE)) {
+			fprintf(stderr, "rdma_send_recv_benchmark error\n");
+			return 1;
+		}
+	}else{
+		if (rdma_send_recv_benchmark(ctx, servername, max_size, iters, &routs,MULTIPLE)) {
+			fprintf(stderr, "rdma_send_recv_benchmark error\n");
+			return 1;
+		}
 	}
+
+
 
 	ibv_ack_cq_events(ctx->cq_s.cq, num_cq_events);
 
