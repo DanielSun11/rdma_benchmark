@@ -857,6 +857,7 @@ int main(int argc, char *argv[])
 		return 1;
 
 	inet_ntop(AF_INET6, &rem_dest->gid, gid, sizeof gid);
+
 	printf("remote address: LID 0x%04x, QPN 0x%06x, PSN 0x%06x,KEY 0x%08x,ADDR 0x%lx,GID %s\n",
 	       rem_dest->lid, rem_dest->qpn, rem_dest->psn,rem_dest->rkey,rem_dest->dest_addr, gid);
 	ctx->remote_info = rem_dest;
