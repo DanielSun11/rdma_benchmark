@@ -512,12 +512,12 @@ static int post_recv(struct context *ctx, int n)
 	return i;
 }
 
-static int post_send(struct context *ctx)
+static int post_send(struct context *ctx,int size)
 {
 	struct ibv_sge list;
 	memset(&list, 0, sizeof(list));
 	list.addr	= (uintptr_t) ctx->buf;
-	list.length = ctx->size;
+	list.length = size;
 	list.lkey	= ctx->mr->lkey;
 
 	struct ibv_send_wr wr;
@@ -551,13 +551,13 @@ static void usage(const char *argv0)
 	printf("  -g, --gid-idx=<gid index> local port gid index\n");
 }
 
-int post_send_poll(struct context *ctx, int count)
+int post_send_poll(struct context *ctx, int count,int size)
 {
 	int send = 0, poll = 0;
 	int wc_count = 50;
 
 	for (send = 0; send < count; send++) {
-		if (post_send(ctx)) {
+		if (post_send(ctx,size)) {
 			fprintf(stderr, "Couldn't post send\n");
 			return 1;
 		}
@@ -575,7 +575,7 @@ int post_send_poll(struct context *ctx, int count)
 		poll += ne;
 	
 	}
-	printf("send = %d, poll = %d\n", send, poll);
+	//printf("send = %d, poll = %d\n", send, poll);
 	return 0;
 }
 
@@ -598,7 +598,7 @@ int post_poll_recv(struct context *ctx, int *routs, int iters)
 		rcnt += ne;
 
 		*routs -= ne;
-		if (*routs < wc_count) {
+		if (*routs < ctx->rx_depth) {
 			*routs += post_recv(ctx, ctx->rx_depth - *routs);
 			if (*routs < ctx->rx_depth) {
 				fprintf(stderr, "Couldn't post receive (%d)\n", *routs);
@@ -606,27 +606,21 @@ int post_poll_recv(struct context *ctx, int *routs, int iters)
 			}
 		}
 	}
-	printf("poll = %d\n", rcnt);
+	//printf("poll = %d\n", rcnt);
 	return 0;
 }
 
-int test_time(struct context *ctx, char *servername, int size, int iters, int *routs)
+int rdma_send_recv_ops(struct context *ctx, char *servername, int size, int iters, int *routs)
 {
-	struct timeval start, end;
 	int rx_depth = ctx->rx_depth;
-	if (gettimeofday(&start, NULL)) {
-		perror("gettimeofday");
-		return 1;
-	}
-
 	if (servername) {
 		for (int i = 0; i < iters / rx_depth; i++) {
-			if (post_send_poll(ctx, rx_depth)) {
+			if (post_send_poll(ctx, rx_depth,size)) {
 				fprintf(stderr, "Couldn't post_send_poll1\n");
 				return 1;
 			}
 		}
-		if (post_send_poll(ctx, iters % rx_depth)) {
+		if (post_send_poll(ctx, iters % rx_depth,size)) {
 			fprintf(stderr, "Couldn't post_send_poll2\n");
 			return 1;
 		}
@@ -636,24 +630,41 @@ int test_time(struct context *ctx, char *servername, int size, int iters, int *r
 			return 1;
 		}
 	}
-	printf("routs = %d\n", *routs);
-
-	if (gettimeofday(&end, NULL)) {
-		perror("gettimeofday");
-		return 1;
-	}
-
-	{
-		float usec = (end.tv_sec - start.tv_sec) * 1000000 +
-			(end.tv_usec - start.tv_usec);
-		long long bytes = (long long) size * iters;
-
-		printf("%lld bytes in %.2f seconds = %.2f Mbit/sec\n",
-		       bytes, usec / 1000000., bytes * 8. / usec);
-		printf("%d iters in %.2f seconds = %.2f usec/iter\n",
-		       iters, usec / 1000000., usec / iters);
-	}
 	return 0;
+}
+int rdma_send_recv_benchmark(struct context *ctx, char *servername, int size, int iters, int *routs){
+
+	int rt = 0;
+	struct timeval start, end;
+	printf("RDMA Send_Recv Benchmark  \n");
+	printf("Connection type : %s\n","RC");
+	printf("%-20s %-20s %-20s \n", "Message size(byte) ", "Iterations", "Bandwidth(Gbps)");
+	for(int i = 2; i < size; i*=2 ){
+		//start  clock
+		if (gettimeofday(&start, NULL)) {
+			perror("gettimeofday");
+			return -1;
+		}
+		rt = rdma_send_recv_ops(ctx,servername,i,iters,routs);
+		//end  clock
+		if (gettimeofday(&end, NULL)) {
+			perror("gettimeofday");
+			return -1;
+		}
+		if(rt){
+			printf("rdma_send_recv_benchmark error size %d rt %d \n",i,rt);
+			return rt;
+		}
+
+		{
+			float usec = (end.tv_sec - start.tv_sec) * 1000000 +
+				(end.tv_usec - start.tv_usec);
+			long long bytes = (long long) i * iters ;
+			double  bw = bytes*8.0/(usec)/1000;
+			printf("%-20d  %-20d   %-20.3lf \n",i,iters,bw);
+		}
+	}
+	return rt;
 }
 
 int main(int argc, char *argv[])
@@ -825,7 +836,7 @@ int main(int argc, char *argv[])
 	my_dest.qpn = ctx->qp->qp_num;
 	my_dest.psn = lrand48() & 0xffffff;
 	inet_ntop(AF_INET6, &my_dest.gid, gid, sizeof gid);
-	printf("  local address:  LID 0x%04x, QPN 0x%06x, PSN 0x%06x, GID %s\n",
+	printf("local address:  LID 0x%04x, QPN 0x%06x, PSN 0x%06x, GID %s\n",
 	       my_dest.lid, my_dest.qpn, my_dest.psn, gid);
 
 	if (servername)
@@ -838,7 +849,7 @@ int main(int argc, char *argv[])
 		return 1;
 
 	inet_ntop(AF_INET6, &rem_dest->gid, gid, sizeof gid);
-	printf("  remote address: LID 0x%04x, QPN 0x%06x, PSN 0x%06x, GID %s\n",
+	printf("remote address: LID 0x%04x, QPN 0x%06x, PSN 0x%06x, GID %s\n",
 	       rem_dest->lid, rem_dest->qpn, rem_dest->psn, gid);
 
 	if (servername)
@@ -848,8 +859,8 @@ int main(int argc, char *argv[])
 
 	ctx->pending = RECV_WRID;
 
-	if (test_time(ctx, servername, size, iters, &routs)) {
-		fprintf(stderr, "test_time error\n");
+	if (rdma_send_recv_benchmark(ctx, servername, size, iters, &routs)) {
+		fprintf(stderr, "rdma_send_recv_benchmark error\n");
 		return 1;
 	}
 
