@@ -88,7 +88,17 @@ enum ibv_mtu mtu_to_enum(int mtu)
 	default:   return IBV_MTU_1024;
 	}
 }
-
+int enum_to_mtu(enum ibv_mtu mtu)
+{
+	switch (mtu) {
+	case IBV_MTU_256:  return 256;
+	case IBV_MTU_512:  return 512;
+	case IBV_MTU_1024 : return 1024;
+	case IBV_MTU_2048 : return 2048;
+	case IBV_MTU_4096 : return 4096;
+	default:   return 1024;
+	}
+}
 static int connect_ctx(struct context *ctx, int port, int my_psn,
 			  enum ibv_mtu mtu, int sl,
 			  struct dest *dest, int sgid_idx)
@@ -638,14 +648,16 @@ int rdma_send_recv_ops(struct context *ctx, char *servername, int size, int iter
 	}
 	return 0;
 }
-int rdma_send_recv_benchmark(struct context *ctx, char *servername, int max_size, int iters, int *routs,enum bench_mode mode){
+int rdma_send_recv_benchmark(struct context *ctx, char *servername, int max_size, int iters, int *routs,enum bench_mode mode,enum ibv_mtu mtu){
 
 	int rt = 0;
 	struct timeval start, end;
+	int mtu_size = enum_to_mtu(mtu);
+	int header_size = 58;
+	int size = 2;
 	printf("RDMA Send_Recv Benchmark  \n");
 	printf("Connection type : %s\n","RC");
-	printf("%-20s %-20s %-20s \n", "Message size(byte) ", "Iterations", "Bandwidth(Gbps)");
-	int size = 2;
+	printf("%-20s %-20s %-20s %-20s\n", "Message size(byte) ", "Iterations", "Effective BW(Gbps)","Total BW(Gbps)");
 	if(mode == SINGLE){
 		size = max_size;
 	}
@@ -670,8 +682,10 @@ int rdma_send_recv_benchmark(struct context *ctx, char *servername, int max_size
 			float usec = (end.tv_sec - start.tv_sec) * 1000000 +
 				(end.tv_usec - start.tv_usec);
 			long long bytes = (long long) size * iters ;
-			double  bw = bytes*8.0/(usec)/1000;
-			printf("%-20d  %-20d   %-20.3lf \n",size,iters,bw);
+			double  e_bw = bytes*8.0/(usec)/1000;
+			bytes += ((size+mtu_size-1)/mtu_size)*iters*header_size;
+			double  t_bw = bytes*8.0/(usec)/1000;
+			printf("%-20d  %-20d    %-20.3lf %-20.3lf\n",size,iters,e_bw,t_bw);
 		}
 		if(size < max_size && size*2 > max_size){
 			size = max_size;
@@ -881,12 +895,12 @@ int main(int argc, char *argv[])
 
 	ctx->pending = RECV_WRID;
 	if(size){
-		if (rdma_send_recv_benchmark(ctx, servername, size, iters, &routs,SINGLE)) {
+		if (rdma_send_recv_benchmark(ctx, servername, size, iters, &routs,SINGLE,mtu)) {
 			fprintf(stderr, "rdma_send_recv_benchmark error\n");
 			return 1;
 		}
 	}else{
-		if (rdma_send_recv_benchmark(ctx, servername, max_size, iters, &routs,MULTIPLE)) {
+		if (rdma_send_recv_benchmark(ctx, servername, max_size, iters, &routs,MULTIPLE,mtu)) {
 			fprintf(stderr, "rdma_send_recv_benchmark error\n");
 			return 1;
 		}

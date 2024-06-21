@@ -46,7 +46,6 @@
 #include <time.h>
 #include <infiniband/verbs.h>
 
-//#include "pingpong.h"
 enum ibv_mtu pp_mtu_to_enum(int mtu)
 {
 	switch (mtu) {
@@ -56,6 +55,17 @@ enum ibv_mtu pp_mtu_to_enum(int mtu)
 	case 2048: return IBV_MTU_2048;
 	case 4096: return IBV_MTU_4096;
 	default:   return 0;
+	}
+}
+int enum_to_mtu(enum ibv_mtu mtu)
+{
+	switch (mtu) {
+	case IBV_MTU_256:  return 256;
+	case IBV_MTU_512:  return 512;
+	case IBV_MTU_1024 : return 1024;
+	case IBV_MTU_2048 : return 2048;
+	case IBV_MTU_4096 : return 4096;
+	default:   return 1024;
 	}
 }
 
@@ -605,9 +615,11 @@ void rdma_write_ops(struct pingpong_context * ctx,unsigned int iters,uint32_t si
     }
 }
 
-void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_size,enum bench_mode mode){
+void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_size,enum bench_mode mode,enum ibv_mtu mtu){
 	struct timeval start, end;
 	int size = 0;
+	int mtu_size = enum_to_mtu(mtu);
+	int header_size = 58;
 	if(mode == SINGLE){
 		size = max_size;
 	}else if(mode == MULTIPLE){
@@ -615,7 +627,7 @@ void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_s
 	}
 	printf("RDMA Write Benchmark\n");
 	printf("Connection type : %s\n","UC");
-	printf("%-20s %-20s %-20s \n", "Message size(byte) ", "Iterations", "Bandwidth(Gbps)");
+	printf("%-20s %-20s %-20s %-20s\n", "Message size(byte) ", "Iterations", "Effective BW(Gbps)","Total BW(Gbps)");
 	while(size <= max_size){
 		//start  write
 		if (gettimeofday(&start, NULL)) {
@@ -632,8 +644,10 @@ void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_s
 			float usec = (end.tv_sec - start.tv_sec) * 1000000 +
 				(end.tv_usec - start.tv_usec);
 			long long bytes = (long long) size * iters ;
-			double  bw = bytes*8.0/(usec)/1000;
-			printf("%-20d  %-20d   %-20.3lf \n",size,iters,bw);
+			double  e_bw = bytes*8.0/(usec)/1000;
+			bytes += ((size+mtu_size-1)/mtu_size)*iters*header_size;
+			double  t_bw = bytes*8.0/(usec)/1000;
+			printf("%-20d  %-20d    %-20.3lf %-20.3lf\n",size,iters,e_bw,t_bw);
 		}
 		if(size < max_size && size*2 > max_size){
 			size = max_size;
@@ -863,9 +877,9 @@ int main(int argc, char *argv[])
 
 	if(servername){
 		if(size == 0){
-			rdma_write_benchmark(ctx,iters,max_size,MULTIPLE);
+			rdma_write_benchmark(ctx,iters,max_size,MULTIPLE,mtu);
 		}else{
-			rdma_write_benchmark(ctx,iters,size,SINGLE);
+			rdma_write_benchmark(ctx,iters,size,SINGLE,mtu);
 		}
 		memcpy(sync_message,"done",sizeof("done"));
 		int ret = write(ctx->sockfd,sync_message,sizeof(*sync_message));
