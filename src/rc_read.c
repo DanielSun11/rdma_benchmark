@@ -583,10 +583,10 @@ int poll_cq(struct context * ctx,int nums){
 
 	return 0;
 }
-void rdma_read_ops(struct context * ctx,unsigned int iters,uint32_t size){
+void rdma_read_ops(struct context * ctx,unsigned int iters,uint32_t size,int poll_batch){
 	uint32_t nums_cqe = 0;
 	struct ibv_wc wc[25];
-    // Perform RDMA Write operations
+    // Perform RDMA Read operations
     for (int i = 1; i <= iters; i++) {
         struct ibv_send_wr wr, *bad_wr;
 		struct ibv_sge list = {
@@ -609,8 +609,8 @@ void rdma_read_ops(struct context * ctx,unsigned int iters,uint32_t size){
 			printf("nums_cqe %d iter %d \n",nums_cqe,i);
             return;
         }
-		if(i && i%50 == 0){
-			int ret = poll_cq(ctx,50);
+		if(i && i%poll_batch == 0){
+			int ret = poll_cq(ctx,poll_batch);
 			if(ret  < 0){
 				perror("error in poll");
 				return ;
@@ -620,7 +620,7 @@ void rdma_read_ops(struct context * ctx,unsigned int iters,uint32_t size){
 
     }
 }
-void rdma_read_benchmark(struct context * ctx,unsigned int iters,uint32_t max_size,enum bench_mode mode,enum ibv_mtu mtu){
+void rdma_read_benchmark(struct context * ctx,unsigned int iters,uint32_t max_size,enum bench_mode mode,enum ibv_mtu mtu,int poll_batch){
 	struct timeval start, end;
 	int size = 0;
 	int mtu_size = enum_to_mtu(mtu);
@@ -640,7 +640,7 @@ void rdma_read_benchmark(struct context * ctx,unsigned int iters,uint32_t max_si
 			perror("gettimeofday");
 			return 1;
 		}
-		rdma_read_ops(ctx,iters,size);
+		rdma_read_ops(ctx,iters,size,poll_batch);
 		//end  write
 		if (gettimeofday(&end, NULL)) {
 			perror("gettimeofday");
@@ -683,6 +683,9 @@ static void usage(const char *argv0)
 	printf("  -l, --sl=<sl>          service level value\n");
 	printf("  -g, --gid-idx=<gid index> local port gid index\n");
 	printf("  -u, --max-size=<size>  max size of message to exchange (default 4096)\n");
+	printf("  -b, --batch=<size>   	 batch size of message to write (default 5)\n");
+	printf("  -w, --warm-up=<warm up>  number of warm-up iterations (default 50)\n");
+
 
 	
 }
@@ -701,16 +704,18 @@ int main(int argc, char *argv[])
 	int                      ib_port = 1;
 	unsigned int             size = 0;
 	unsigned int             max_size = 4096;
-	enum ibv_mtu		 mtu = IBV_MTU_1024;
+	enum ibv_mtu		 	 mtu = IBV_MTU_1024;
 	unsigned int             rx_depth = 500;
 	unsigned int             iters = 1000;
 	int                      routs;
 	int                      rcnt, scnt;
 	int                      num_cq_events = 0;
 	int                      sl = 0;
-	int			 gidx = -1;
-	char			 gid[33];
+	int			 			 gidx = -1;
+	char			 		 gid[33];
 	char 				     sync_message[sizeof("done")];
+	int 					 warm_up = 50;
+	int 					 poll_batch = 5;
 
 
 	srand48(getpid() * time(NULL));
@@ -729,10 +734,12 @@ int main(int argc, char *argv[])
 			{ "sl",       1, NULL, 'l' },
 			{ "max-size", 1, NULL, 'u' },
 			{ "gid-idx",  1, NULL, 'g' },
+			{ "warm-up",  1, NULL, 'w' },
+			{ "batch", 	  1, NULL, 'b' },
 			{ NULL,		  0, NULL, 0 }  // 结尾元素，必要以表示数组结束
 		};
 
-		c = getopt_long(argc, argv, "p:d:i:s:m:r:n:l:u:eg:oOPtcjN",
+		c = getopt_long(argc, argv, "p:d:i:s:m:r:n:l:u:w:b:eg:oOPtcjN",
 				long_options, NULL);
 
 		if (c == -1)
@@ -788,6 +795,12 @@ int main(int argc, char *argv[])
 			break;
 		case 'u':
 			max_size = strtol(optarg, NULL, 0);
+			break;
+		case 'w':
+			warm_up = strtol(optarg, NULL, 0);
+			break;
+		case 'b':
+			poll_batch = strtol(optarg, NULL, 0);
 			break;
 
 		default:
@@ -861,7 +874,6 @@ int main(int argc, char *argv[])
 	my_dest.dest_addr =(uint64_t)ctx->mr->addr;
 	printf("local address:  LID 0x%04x, QPN 0x%06x, PSN 0x%06x,KEY 0x%08x,ADDR 0x%lx,GID %s\n",
 	       my_dest.lid, my_dest.qpn, my_dest.psn,my_dest.rkey,my_dest.dest_addr, gid);
-	
 	if (servername)
 		rem_dest = client_exch_dest(ctx,servername, port, &my_dest);
 	else
@@ -883,12 +895,18 @@ int main(int argc, char *argv[])
 			return 1;
 
 	ctx->pending = RECV_WRID;
-
+	//warm up
+	if(servername){
+		rdma_read_ops(ctx,warm_up,(size == 0? max_size:size)/2,poll_batch);
+	}else{
+	//for the one side ops, server needn't do anything
+	}
+	//start benchmark 
 	if(servername){
 		if(size == 0){
-			rdma_read_benchmark(ctx,iters,max_size,MULTIPLE,mtu);
+			rdma_read_benchmark(ctx,iters,max_size,MULTIPLE,mtu,poll_batch);
 		}else{
-			rdma_read_benchmark(ctx,iters,size,SINGLE,mtu);
+			rdma_read_benchmark(ctx,iters,size,SINGLE,mtu,poll_batch);
 		}
 		memcpy(sync_message,"done",sizeof("done"));
 		int ret = write(ctx->sockfd,sync_message,sizeof(*sync_message));

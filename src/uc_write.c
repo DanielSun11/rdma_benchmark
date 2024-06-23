@@ -551,9 +551,12 @@ static void usage(const char *argv0)
 	printf("  -r, --rx-depth=<dep>   number of receives to post at a time (default 500)\n");
 	printf("  -n, --iters=<iters>    number of exchanges (default 1000)\n");
 	printf("  -l, --sl=<sl>          service level value\n");
-	printf("  -e, --events           sleep on CQ events (default poll)\n");
+	//printf("  -e, --events           sleep on CQ events (default poll)\n");
 	printf("  -g, --gid-idx=<gid index> local port gid index\n");
-	printf("  -c, --chk              validate received buffer\n");
+	//printf("  -c, --chk              validate received buffer\n");
+	printf("  -b, --batch=<size>   	 batch size of message to write (default 5)\n");
+	printf("  -w, --warm-up=<warm up> number of warm-up iterations (default 50)\n");
+
 }
 int poll_cq(struct pingpong_context * ctx,int nums){
 	struct ibv_wc wc[nums];
@@ -578,7 +581,7 @@ int poll_cq(struct pingpong_context * ctx,int nums){
 
 	return 0;
 }
-void rdma_write_ops(struct pingpong_context * ctx,unsigned int iters,uint32_t size){
+void rdma_write_ops(struct pingpong_context * ctx,unsigned int iters,uint32_t size,int poll_batch){
 	uint32_t nums_cqe = 0;
 	struct ibv_wc wc[25];
     // Perform RDMA Write operations
@@ -604,8 +607,8 @@ void rdma_write_ops(struct pingpong_context * ctx,unsigned int iters,uint32_t si
 			printf("nums_cqe %d iter %d \n",nums_cqe,i);
             return;
         }
-		if(i && i%50 == 0){
-			int ret = poll_cq(ctx,50);
+		if(i && i%poll_batch == 0){
+			int ret = poll_cq(ctx,poll_batch);
 			if(ret  < 0){
 				perror("error in poll");
 				return ;
@@ -615,7 +618,7 @@ void rdma_write_ops(struct pingpong_context * ctx,unsigned int iters,uint32_t si
     }
 }
 
-void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_size,enum bench_mode mode,enum ibv_mtu mtu){
+void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_size,enum bench_mode mode,enum ibv_mtu mtu,int poll_batch){
 	struct timeval start, end;
 	int size = 0;
 	int mtu_size = enum_to_mtu(mtu);
@@ -634,7 +637,7 @@ void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_s
 			perror("gettimeofday");
 			return 1;
 		}
-		rdma_write_ops(ctx,iters,size);
+		rdma_write_ops(ctx,iters,size,poll_batch);
 		//end  write
 		if (gettimeofday(&end, NULL)) {
 			perror("gettimeofday");
@@ -683,6 +686,8 @@ int main(int argc, char *argv[])
 	int                      sl = 0;
 	int			 			 gidx = 2;
 	char			 		 gid[33];
+	int 					 warm_up = 50;
+	int 					 poll_batch = 5;
 	char 				     sync_message[sizeof("done")];
 
 	srand48(getpid() * time(NULL));
@@ -702,11 +707,13 @@ int main(int argc, char *argv[])
 			{ .name = "events",   .has_arg = 0, .val = 'e' },
 			{ .name = "max-size", .has_arg = 1, .val = 'u' },
 			{ .name = "gid-idx",  .has_arg = 1, .val = 'g' },
+			{ .name = "warm-up",  .has_arg =1, NULL, .val ='w' },
+			{ .name = "batch", 	  .has_arg =1, NULL, .val ='b' },
 			{ .name = "chk",      .has_arg = 0, .val = 'c' },
 			{}
 		};
 
-		c = getopt_long(argc, argv, "p:d:i:s:m:r:n:l:u:eg:c",
+		c = getopt_long(argc, argv, "p:d:i:s:m:r:n:l:u:w:b:eg:c",
 				long_options, NULL);
 		if (c == -1)
 			break;
@@ -768,6 +775,12 @@ int main(int argc, char *argv[])
 			break;
 		case 'c':
 			validate_buf = 1;
+			break;
+		case 'w':
+			warm_up = strtol(optarg, NULL, 0);
+			break;
+		case 'b':
+			poll_batch = strtol(optarg, NULL, 0);
 			break;
 
 		default:
@@ -875,11 +888,18 @@ int main(int argc, char *argv[])
 
 	ctx->pending = PINGPONG_RECV_WRID;
 
+	//warm up
+	if(servername){
+		rdma_write_ops(ctx,warm_up,(size == 0? max_size:size)/4,poll_batch);
+	}else{
+		//for the one side ops, server needn't do anything
+	}
+	//start benchmark 
 	if(servername){
 		if(size == 0){
-			rdma_write_benchmark(ctx,iters,max_size,MULTIPLE,mtu);
+			rdma_write_benchmark(ctx,iters,max_size,MULTIPLE,mtu,poll_batch);
 		}else{
-			rdma_write_benchmark(ctx,iters,size,SINGLE,mtu);
+			rdma_write_benchmark(ctx,iters,size,SINGLE,mtu,poll_batch);
 		}
 		memcpy(sync_message,"done",sizeof("done"));
 		int ret = write(ctx->sockfd,sync_message,sizeof(*sync_message));
