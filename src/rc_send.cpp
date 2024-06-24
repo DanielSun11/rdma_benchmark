@@ -567,7 +567,6 @@ static void usage(const char *argv0)
 	printf("  -b, --batch=<size>   	 batch size of message to write (default 5)\n");
 	printf("  -w, --warm-up=<warm up>  number of warm-up iterations (default 50)\n");
 
-
 }
 
 int post_send_poll(struct context *ctx, int count,int size)
@@ -635,11 +634,13 @@ int rdma_send_recv_ops(struct context *ctx, char *servername, int size, int iter
 	if (servername) {
 		for (int i = 0; i < iters / poll_batch; i++) {
 			if (post_send_poll(ctx, poll_batch,size)) {
+
 				fprintf(stderr, "Couldn't post_send_poll1\n");
 				return 1;
 			}
 		}
 		if (post_send_poll(ctx, iters % poll_batch,size)) {
+
 			fprintf(stderr, "Couldn't post_send_poll2\n");
 			return 1;
 		}
@@ -651,6 +652,7 @@ int rdma_send_recv_ops(struct context *ctx, char *servername, int size, int iter
 	}
 	return 0;
 }
+
 int rdma_send_recv_benchmark(struct context *ctx, char *servername, int max_size, int iters, int *routs,enum bench_mode mode,enum ibv_mtu mtu,int poll_batch){
 
 	int rt = 0;
@@ -670,7 +672,9 @@ int rdma_send_recv_benchmark(struct context *ctx, char *servername, int max_size
 			perror("gettimeofday");
 			return -1;
 		}
+
 		rt = rdma_send_recv_ops(ctx,servername,size,iters,routs,poll_batch);
+
 		//end  clock
 		if (gettimeofday(&end, NULL)) {
 			perror("gettimeofday");
@@ -689,6 +693,7 @@ int rdma_send_recv_benchmark(struct context *ctx, char *servername, int max_size
 			bytes += ((size+mtu_size-1)/mtu_size)*iters*header_size;
 			double  t_bw = bytes*8.0/(usec)/1000;
 			printf("%-20d  %-20d    %-20.3lf %-20.3lf\n",size,iters,e_bw,t_bw);
+
 		}
 		if(size < max_size && size*2 > max_size){
 			size = max_size;
@@ -746,7 +751,9 @@ int main(int argc, char *argv[])
 			{ NULL,		  0, NULL, 0 }  // 结尾元素，必要以表示数组结束
 		};
 
+
 		c = getopt_long(argc, argv, "p:d:i:s:m:r:n:l:u:w:b:eg:oOPtcjN",
+
 				long_options, NULL);
 
 		if (c == -1)
@@ -804,7 +811,7 @@ int main(int argc, char *argv[])
 		case 'u':
 			max_size = strtol(optarg, NULL, 0);
 			break;
-
+        
 		case 'w':
 			warm_up = strtol(optarg, NULL, 0);
 			break;
@@ -812,6 +819,7 @@ int main(int argc, char *argv[])
 		case 'b':
 			poll_batch = strtol(optarg, NULL, 0);
 			break;
+
 
 		default:
 			usage(argv[0]);
@@ -909,6 +917,7 @@ int main(int argc, char *argv[])
 			return 1;
 
 	ctx->pending = RECV_WRID;
+
 	//warm up
 	rdma_send_recv_ops(ctx,servername,(size == 0? max_size:size)/4,poll_batch,&routs,poll_batch);
 	//start bench mark

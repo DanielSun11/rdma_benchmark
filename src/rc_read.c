@@ -686,7 +686,6 @@ static void usage(const char *argv0)
 	printf("  -b, --batch=<size>   	 batch size of message to write (default 5)\n");
 	printf("  -w, --warm-up=<warm up>  number of warm-up iterations (default 50)\n");
 
-
 	
 }
 
