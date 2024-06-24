@@ -56,7 +56,7 @@ struct dest {
 void wire_gid_to_gid(const char *wgid, union ibv_gid *gid)
 {
 	char tmp[9];
-	__be32 v32;
+	int  v32;
 	int i;
 	uint32_t tmp_gid[4];
 
@@ -447,7 +447,7 @@ clean_mr:
 
 clean_dm:
 	if (ctx->dm)
-		ibv_free_dm(ctx->dm);
+		//ibv_free_dm(ctx->dm);
 
 clean_pd:
 	ibv_dealloc_pd(ctx->pd);
@@ -486,10 +486,10 @@ static int close_ctx(struct context *ctx)
 	}
 
 	if (ctx->dm) {
-		if (ibv_free_dm(ctx->dm)) {
-			fprintf(stderr, "Couldn't free DM\n");
-			return 1;
-		}
+		// if (ibv_free_dm(ctx->dm)) {
+		// 	fprintf(stderr, "Couldn't free DM\n");
+		// 	return 1;
+		// }
 	}
 
 	if (ibv_dealloc_pd(ctx->pd)) {
