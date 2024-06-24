@@ -88,7 +88,17 @@ enum ibv_mtu mtu_to_enum(int mtu)
 	default:   return IBV_MTU_1024;
 	}
 }
-
+int enum_to_mtu(enum ibv_mtu mtu)
+{
+	switch (mtu) {
+	case IBV_MTU_256:  return 256;
+	case IBV_MTU_512:  return 512;
+	case IBV_MTU_1024 : return 1024;
+	case IBV_MTU_2048 : return 2048;
+	case IBV_MTU_4096 : return 4096;
+	default:   return 1024;
+	}
+}
 static int connect_ctx(struct context *ctx, int port, int my_psn,
 			  enum ibv_mtu mtu, int sl,
 			  struct dest *dest, int sgid_idx)
@@ -554,6 +564,8 @@ static void usage(const char *argv0)
 	printf("  -l, --sl=<sl>          service level value\n");
 	printf("  -g, --gid-idx=<gid index> local port gid index\n");
 	printf("  -u, --max-size=<size>  max size of message to exchange (default 4096)\n");
+	printf("  -b, --batch=<size>   	 batch size of message to write (default 5)\n");
+	printf("  -w, --warm-up=<warm up>  number of warm-up iterations (default 50)\n");
 
 }
 
@@ -616,17 +628,19 @@ int post_poll_recv(struct context *ctx, int *routs, int iters)
 	return 0;
 }
 
-int rdma_send_recv_ops(struct context *ctx, char *servername, int size, int iters, int *routs)
+int rdma_send_recv_ops(struct context *ctx, char *servername, int size, int iters, int *routs,int poll_batch)
 {
-	int rx_depth = ctx->rx_depth;
+	//int rx_depth = ctx->rx_depth;
 	if (servername) {
-		for (int i = 0; i < iters / rx_depth; i++) {
-			if (post_send_poll(ctx, rx_depth,size)) {
+		for (int i = 0; i < iters / poll_batch; i++) {
+			if (post_send_poll(ctx, poll_batch,size)) {
+
 				fprintf(stderr, "Couldn't post_send_poll1\n");
 				return 1;
 			}
 		}
-		if (post_send_poll(ctx, iters % rx_depth,size)) {
+		if (post_send_poll(ctx, iters % poll_batch,size)) {
+
 			fprintf(stderr, "Couldn't post_send_poll2\n");
 			return 1;
 		}
@@ -638,14 +652,17 @@ int rdma_send_recv_ops(struct context *ctx, char *servername, int size, int iter
 	}
 	return 0;
 }
-int rdma_send_recv_benchmark(struct context *ctx, char *servername, int max_size, int iters, int *routs,enum bench_mode mode){
+
+int rdma_send_recv_benchmark(struct context *ctx, char *servername, int max_size, int iters, int *routs,enum bench_mode mode,enum ibv_mtu mtu,int poll_batch){
 
 	int rt = 0;
 	struct timeval start, end;
+	int mtu_size = enum_to_mtu(mtu);
+	int header_size = 58;
+	int size = 2;
 	printf("RDMA Send_Recv Benchmark  \n");
 	printf("Connection type : %s\n","RC");
-	printf("%-20s %-20s %-20s \n", "Message size(byte) ", "Iterations", "Bandwidth(Gbps)");
-	int size = 2;
+	printf("%-20s %-20s %-20s %-20s\n", "Message size(byte) ", "Iterations", "Effective BW(Gbps)","Total BW(Gbps)");
 	if(mode == SINGLE){
 		size = max_size;
 	}
@@ -655,7 +672,9 @@ int rdma_send_recv_benchmark(struct context *ctx, char *servername, int max_size
 			perror("gettimeofday");
 			return -1;
 		}
-		rt = rdma_send_recv_ops(ctx,servername,size,iters,routs);
+
+		rt = rdma_send_recv_ops(ctx,servername,size,iters,routs,poll_batch);
+
 		//end  clock
 		if (gettimeofday(&end, NULL)) {
 			perror("gettimeofday");
@@ -670,8 +689,11 @@ int rdma_send_recv_benchmark(struct context *ctx, char *servername, int max_size
 			float usec = (end.tv_sec - start.tv_sec) * 1000000 +
 				(end.tv_usec - start.tv_usec);
 			long long bytes = (long long) size * iters ;
-			double  bw = bytes*8.0/(usec)/1000;
-			printf("%-20d  %-20d   %-20.3lf \n",size,iters,bw);
+			double  e_bw = bytes*8.0/(usec)/1000;
+			bytes += ((size+mtu_size-1)/mtu_size)*iters*header_size;
+			double  t_bw = bytes*8.0/(usec)/1000;
+			printf("%-20d  %-20d    %-20.3lf %-20.3lf\n",size,iters,e_bw,t_bw);
+
 		}
 		if(size < max_size && size*2 > max_size){
 			size = max_size;
@@ -703,8 +725,10 @@ int main(int argc, char *argv[])
 	int                      rcnt, scnt;
 	int                      num_cq_events = 0;
 	int                      sl = 0;
-	int			 gidx = -1;
-	char			 gid[33];
+	int			 			 gidx = -1;
+	char			 		 gid[33];
+	int 					 warm_up = 50;
+	int 					 poll_batch = 5;
 
 	srand48(getpid() * time(NULL));
 
@@ -722,10 +746,14 @@ int main(int argc, char *argv[])
 			{ "sl",       1, NULL, 'l' },
 			{ "max-size", 1, NULL, 'u' },
 			{ "gid-idx",  1, NULL, 'g' },
+			{ "warm-up",  1, NULL, 'w' },
+			{ "batch", 	  1, NULL, 'b' },
 			{ NULL,		  0, NULL, 0 }  // 结尾元素，必要以表示数组结束
 		};
 
-		c = getopt_long(argc, argv, "p:d:i:s:m:r:n:l:u:eg:oOPtcjN",
+
+		c = getopt_long(argc, argv, "p:d:i:s:m:r:n:l:u:w:b:eg:oOPtcjN",
+
 				long_options, NULL);
 
 		if (c == -1)
@@ -783,6 +811,15 @@ int main(int argc, char *argv[])
 		case 'u':
 			max_size = strtol(optarg, NULL, 0);
 			break;
+        
+		case 'w':
+			warm_up = strtol(optarg, NULL, 0);
+			break;
+
+		case 'b':
+			poll_batch = strtol(optarg, NULL, 0);
+			break;
+
 
 		default:
 			usage(argv[0]);
@@ -880,13 +917,17 @@ int main(int argc, char *argv[])
 			return 1;
 
 	ctx->pending = RECV_WRID;
+
+	//warm up
+	rdma_send_recv_ops(ctx,servername,(size == 0? max_size:size)/4,poll_batch,&routs,poll_batch);
+	//start bench mark
 	if(size){
-		if (rdma_send_recv_benchmark(ctx, servername, size, iters, &routs,SINGLE)) {
+		if (rdma_send_recv_benchmark(ctx, servername, size, iters, &routs,SINGLE,mtu,poll_batch)) {
 			fprintf(stderr, "rdma_send_recv_benchmark error\n");
 			return 1;
 		}
 	}else{
-		if (rdma_send_recv_benchmark(ctx, servername, max_size, iters, &routs,MULTIPLE)) {
+		if (rdma_send_recv_benchmark(ctx, servername, max_size, iters, &routs,MULTIPLE,mtu,poll_batch)) {
 			fprintf(stderr, "rdma_send_recv_benchmark error\n");
 			return 1;
 		}

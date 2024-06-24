@@ -46,7 +46,6 @@
 #include <time.h>
 #include <infiniband/verbs.h>
 
-//#include "pingpong.h"
 enum ibv_mtu pp_mtu_to_enum(int mtu)
 {
 	switch (mtu) {
@@ -56,6 +55,17 @@ enum ibv_mtu pp_mtu_to_enum(int mtu)
 	case 2048: return IBV_MTU_2048;
 	case 4096: return IBV_MTU_4096;
 	default:   return 0;
+	}
+}
+int enum_to_mtu(enum ibv_mtu mtu)
+{
+	switch (mtu) {
+	case IBV_MTU_256:  return 256;
+	case IBV_MTU_512:  return 512;
+	case IBV_MTU_1024 : return 1024;
+	case IBV_MTU_2048 : return 2048;
+	case IBV_MTU_4096 : return 4096;
+	default:   return 1024;
 	}
 }
 
@@ -541,9 +551,12 @@ static void usage(const char *argv0)
 	printf("  -r, --rx-depth=<dep>   number of receives to post at a time (default 500)\n");
 	printf("  -n, --iters=<iters>    number of exchanges (default 1000)\n");
 	printf("  -l, --sl=<sl>          service level value\n");
-	printf("  -e, --events           sleep on CQ events (default poll)\n");
+	//printf("  -e, --events           sleep on CQ events (default poll)\n");
 	printf("  -g, --gid-idx=<gid index> local port gid index\n");
-	printf("  -c, --chk              validate received buffer\n");
+	//printf("  -c, --chk              validate received buffer\n");
+	printf("  -b, --batch=<size>   	 batch size of message to write (default 5)\n");
+	printf("  -w, --warm-up=<warm up> number of warm-up iterations (default 50)\n");
+
 }
 int poll_cq(struct pingpong_context * ctx,int nums){
 	struct ibv_wc wc[nums];
@@ -568,7 +581,7 @@ int poll_cq(struct pingpong_context * ctx,int nums){
 
 	return 0;
 }
-void rdma_write_ops(struct pingpong_context * ctx,unsigned int iters,uint32_t size){
+void rdma_write_ops(struct pingpong_context * ctx,unsigned int iters,uint32_t size,int poll_batch){
 	uint32_t nums_cqe = 0;
 	struct ibv_wc wc[25];
     // Perform RDMA Write operations
@@ -594,8 +607,8 @@ void rdma_write_ops(struct pingpong_context * ctx,unsigned int iters,uint32_t si
 			printf("nums_cqe %d iter %d \n",nums_cqe,i);
             return;
         }
-		if(i && i%50 == 0){
-			int ret = poll_cq(ctx,50);
+		if(i && i%poll_batch == 0){
+			int ret = poll_cq(ctx,poll_batch);
 			if(ret  < 0){
 				perror("error in poll");
 				return ;
@@ -605,9 +618,11 @@ void rdma_write_ops(struct pingpong_context * ctx,unsigned int iters,uint32_t si
     }
 }
 
-void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_size,enum bench_mode mode){
+void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_size,enum bench_mode mode,enum ibv_mtu mtu,int poll_batch){
 	struct timeval start, end;
 	int size = 0;
+	int mtu_size = enum_to_mtu(mtu);
+	int header_size = 58;
 	if(mode == SINGLE){
 		size = max_size;
 	}else if(mode == MULTIPLE){
@@ -615,14 +630,14 @@ void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_s
 	}
 	printf("RDMA Write Benchmark\n");
 	printf("Connection type : %s\n","UC");
-	printf("%-20s %-20s %-20s \n", "Message size(byte) ", "Iterations", "Bandwidth(Gbps)");
+	printf("%-20s %-20s %-20s %-20s\n", "Message size(byte) ", "Iterations", "Effective BW(Gbps)","Total BW(Gbps)");
 	while(size <= max_size){
 		//start  write
 		if (gettimeofday(&start, NULL)) {
 			perror("gettimeofday");
 			return 1;
 		}
-		rdma_write_ops(ctx,iters,size);
+		rdma_write_ops(ctx,iters,size,poll_batch);
 		//end  write
 		if (gettimeofday(&end, NULL)) {
 			perror("gettimeofday");
@@ -632,8 +647,10 @@ void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_s
 			float usec = (end.tv_sec - start.tv_sec) * 1000000 +
 				(end.tv_usec - start.tv_usec);
 			long long bytes = (long long) size * iters ;
-			double  bw = bytes*8.0/(usec)/1000;
-			printf("%-20d  %-20d   %-20.3lf \n",size,iters,bw);
+			double  e_bw = bytes*8.0/(usec)/1000;
+			bytes += ((size+mtu_size-1)/mtu_size)*iters*header_size;
+			double  t_bw = bytes*8.0/(usec)/1000;
+			printf("%-20d  %-20d    %-20.3lf %-20.3lf\n",size,iters,e_bw,t_bw);
 		}
 		if(size < max_size && size*2 > max_size){
 			size = max_size;
@@ -669,6 +686,8 @@ int main(int argc, char *argv[])
 	int                      sl = 0;
 	int			 			 gidx = 2;
 	char			 		 gid[33];
+	int 					 warm_up = 50;
+	int 					 poll_batch = 5;
 	char 				     sync_message[sizeof("done")];
 
 	srand48(getpid() * time(NULL));
@@ -688,11 +707,13 @@ int main(int argc, char *argv[])
 			{ .name = "events",   .has_arg = 0, .val = 'e' },
 			{ .name = "max-size", .has_arg = 1, .val = 'u' },
 			{ .name = "gid-idx",  .has_arg = 1, .val = 'g' },
+			{ .name = "warm-up",  .has_arg =1, NULL, .val ='w' },
+			{ .name = "batch", 	  .has_arg =1, NULL, .val ='b' },
 			{ .name = "chk",      .has_arg = 0, .val = 'c' },
 			{}
 		};
 
-		c = getopt_long(argc, argv, "p:d:i:s:m:r:n:l:u:eg:c",
+		c = getopt_long(argc, argv, "p:d:i:s:m:r:n:l:u:w:b:eg:c",
 				long_options, NULL);
 		if (c == -1)
 			break;
@@ -754,6 +775,12 @@ int main(int argc, char *argv[])
 			break;
 		case 'c':
 			validate_buf = 1;
+			break;
+		case 'w':
+			warm_up = strtol(optarg, NULL, 0);
+			break;
+		case 'b':
+			poll_batch = strtol(optarg, NULL, 0);
 			break;
 
 		default:
@@ -861,11 +888,18 @@ int main(int argc, char *argv[])
 
 	ctx->pending = PINGPONG_RECV_WRID;
 
+	//warm up
+	if(servername){
+		rdma_write_ops(ctx,warm_up,(size == 0? max_size:size)/4,poll_batch);
+	}else{
+		//for the one side ops, server needn't do anything
+	}
+	//start benchmark 
 	if(servername){
 		if(size == 0){
-			rdma_write_benchmark(ctx,iters,max_size,MULTIPLE);
+			rdma_write_benchmark(ctx,iters,max_size,MULTIPLE,mtu,poll_batch);
 		}else{
-			rdma_write_benchmark(ctx,iters,size,SINGLE);
+			rdma_write_benchmark(ctx,iters,size,SINGLE,mtu,poll_batch);
 		}
 		memcpy(sync_message,"done",sizeof("done"));
 		int ret = write(ctx->sockfd,sync_message,sizeof(*sync_message));
