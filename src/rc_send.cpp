@@ -658,7 +658,7 @@ int rdma_send_recv_benchmark(struct context *ctx, char *servername, int max_size
 	int rt = 0;
 	struct timeval start, end;
 	int mtu_size = enum_to_mtu(mtu);
-	int header_size = 58;
+	int header_size = 26;
 	int size = 2;
 	printf("RDMA Send_Recv Benchmark  \n");
 	printf("Connection type : %s\n","RC");

@@ -14,9 +14,10 @@ set(CMAKE_BUILD_TYPE Release) # or debug if you need to use gdb on it.
 
 # Some how g++ has better performance than clang++. Of course I don't know all flags for clang++.
 set(CMAKE_CXX_COMPILER g++) # or clang++
+set(CMAKE_C_COMPILER gcc) # or clang++
+
 #set(CMAKE_CXX_COMPILER clang++) # or clang++
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -g -Ofast -ffast-math -funroll-loops -march=native") # get crazy here
-#add_compile_options("-std=c++17")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -Ofast -ffast-math -funroll-loops -march=native -Wno-error -fpermissive") # get crazy here
 #set(CMAKE_CXX_FLAGS "-O0  -ggdb")
 
 find_library(IBVERBS_LIBRARY ibverbs HINTS /lib/x86_64-linux-gnu/)
@@ -27,8 +28,8 @@ link_libraries( ${IBVERBS_LIBRARY} ${RDMACM_LIBRARY})
 add_executable(rc_send ${PROJECT_SOURCE_DIR}/rc_send.cpp)
 add_executable(rc_pingpong ${PROJECT_SOURCE_DIR}/rc_pingpong.cpp)
 
-add_executable(rc_write ${PROJECT_SOURCE_DIR}/rc_write.c)
-add_executable(rc_read ${PROJECT_SOURCE_DIR}/rc_read.c)
+add_executable(rc_write ${PROJECT_SOURCE_DIR}/rc_write.cpp)
+add_executable(rc_read ${PROJECT_SOURCE_DIR}/rc_read.cpp)
 
 add_executable(uc_pingpong ${PROJECT_SOURCE_DIR}/uc_pingpong.c)
 add_executable(uc_write ${PROJECT_SOURCE_DIR}/uc_write.c)

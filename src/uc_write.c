@@ -54,7 +54,7 @@ enum ibv_mtu pp_mtu_to_enum(int mtu)
 	case 1024: return IBV_MTU_1024;
 	case 2048: return IBV_MTU_2048;
 	case 4096: return IBV_MTU_4096;
-	default:   return 0;
+	default:   return IBV_MTU_1024;
 	}
 }
 int enum_to_mtu(enum ibv_mtu mtu)
@@ -622,7 +622,7 @@ void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_s
 	struct timeval start, end;
 	int size = 0;
 	int mtu_size = enum_to_mtu(mtu);
-	int header_size = 58;
+	int header_size = 26;
 	if(mode == SINGLE){
 		size = max_size;
 	}else if(mode == MULTIPLE){
@@ -635,13 +635,13 @@ void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_s
 		//start  write
 		if (gettimeofday(&start, NULL)) {
 			perror("gettimeofday");
-			return 1;
+			return ;
 		}
 		rdma_write_ops(ctx,iters,size,poll_batch);
 		//end  write
 		if (gettimeofday(&end, NULL)) {
 			perror("gettimeofday");
-			return 1;
+			return ;
 		}
 		{
 			float usec = (end.tv_sec - start.tv_sec) * 1000000 +

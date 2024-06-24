@@ -166,10 +166,14 @@ static struct dest *client_exch_dest(struct context *ctx,const char *servername,
 						 const struct dest *my_dest)
 {
 	struct addrinfo *res, *t;
-	struct addrinfo hints = {
-		.ai_family   = AF_UNSPEC,
-		.ai_socktype = SOCK_STREAM
-	};
+	// struct addrinfo hints = {
+	// 	.ai_family   = AF_UNSPEC,
+	// 	.ai_socktype = SOCK_STREAM
+	// };
+	struct addrinfo hints;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family   = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
 	char *service;
 	char msg[sizeof "0000:000000:000000:00000000:0000000000000000:00000000000000000000000000000000"];
 	int n;
@@ -624,7 +628,7 @@ void rdma_read_benchmark(struct context * ctx,unsigned int iters,uint32_t max_si
 	struct timeval start, end;
 	int size = 0;
 	int mtu_size = enum_to_mtu(mtu);
-	int header_size = 58;
+	int header_size = 26;
 	if(mode == SINGLE){
 		size = max_size;
 	}else if(mode == MULTIPLE){
@@ -638,13 +642,13 @@ void rdma_read_benchmark(struct context * ctx,unsigned int iters,uint32_t max_si
 		//start  write
 		if (gettimeofday(&start, NULL)) {
 			perror("gettimeofday");
-			return 1;
+			return ;
 		}
 		rdma_read_ops(ctx,iters,size,poll_batch);
 		//end  write
 		if (gettimeofday(&end, NULL)) {
 			perror("gettimeofday");
-			return 1;
+			return ;
 		}
 		{
 			float usec = (end.tv_sec - start.tv_sec) * 1000000 +

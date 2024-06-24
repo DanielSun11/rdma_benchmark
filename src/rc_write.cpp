@@ -624,7 +624,7 @@ void rdma_write_benchmark(struct context * ctx,unsigned int iters,uint32_t max_s
 	struct timeval start, end;
 	int size = 0;
 	int mtu_size = enum_to_mtu(mtu);
-	int header_size = 58;
+	int header_size = 26;
 	if(mode == SINGLE){
 		size = max_size;
 	}else if(mode == MULTIPLE){
